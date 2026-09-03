@@ -101,40 +101,79 @@ Re-analyse a finished run without re-running it:
 python3 analyze.py runs/seed1
 ```
 
-## Optional: let a real Claude model do the thinking
+## Optional: real Claude minds, and how to afford 100 of them
 
 By default the agents think locally — the choosing is stochastic Python, not a
 language model. That is what makes 100 agents × 600 ticks finish in four
 seconds.
 
-If you want each agent's choice made by an actual Claude call instead:
-
 ```bash
 pip install anthropic
 export ANTHROPIC_API_KEY=...        # or: ant auth login
 
-python3 run.py --llm --agents 12 --ticks 40
+python3 run.py --llm --agents 12 --ticks 40      # start here
 ```
 
-One call per agent per tick, all agents in a tick issued in parallel. `run.py`
-prints an estimate and asks before spending anything:
+`run.py` prints an estimate and asks before spending anything.
 
+### The cost problem, stated plainly
+
+One call per agent per tick means 100 × 600 = **60,000 calls** for a default
+run. Naively that is a few hundred dollars. Three levers change that, and they
+multiply:
+
+| Configuration | Calls | Cost |
+|---|---:|---:|
+| Opus 5, every agent every tick | 60,000 | ~$525 |
+| Opus 5 + `--llm-batch` | 60,000 | ~$263 |
+| Opus 5 + batch + `--llm-wake 8` | 22,500 | ~$98 |
+| Sonnet 5 + batch + wake | 22,500 | ~$37 |
+| **Haiku 4.5 + batch + wake** | **22,500** | **~$8** |
+
+```bash
+python3 run.py --llm --llm-model claude-haiku-4-5 --llm-batch --llm-wake 8
 ```
---llm: 12 agents x 40 ticks = 480 Claude calls on claude-opus-5
-       rough cost before caching: about $3.60
-       continue? [y/N]
-```
 
-**Start small.** The full default run is 60,000 calls — a few hundred dollars.
-`--llm-model claude-haiku-4-5` is ~5× cheaper if you want a bigger world;
-`--llm-effort` trades depth against spend.
+**1. The model matters more than anything else.** Not because Haiku is cheaper
+per token — because it does not spend output tokens *thinking* before choosing
+between eight verbs. On Opus 5 the reasoning tokens, billed as output,
+dominate the bill for a decision this small. That single fact is most of the
+15× gap.
 
-The rules do not change in this mode. The prompt in `sim/llm_mind.py` states no
-task, no objective and no preferred behaviour; the model sees one agent's own
-perception and memory and nothing else; a name the agent cannot currently see
-cannot be acted on; and if a call fails the agent falls back to its local
-choice, so a network error never becomes a hidden nudge. It is worth reading
-that prompt before you trust any result from this mode.
+**2. `--llm-batch` — the Message Batches API.** A tick is 100 independent
+requests, which is exactly the shape batches are for: half price, and no
+rate-limit pressure from 100 simultaneous calls. The cost is waiting for each
+batch to finish, so a tick takes minutes instead of seconds. For a simulation
+nobody watches live, that is the right trade — start a long run and come back.
+
+**3. `--llm-wake N` — only think when something happened.** An agent is
+consulted when it heard something or someone new came into view, and otherwise
+at least every N moments so it never freezes. In between it uses its local
+choice.
+
+> **Be careful with this one.** It is *not* neutral. An agent thinks harder in
+> company than alone, which is a bias the world would not otherwise impose. It
+> is off by default. Turn it on when you want a long run you can afford — not
+> when you want a clean result about whether groups form.
+
+### What does *not* help
+
+Prompt caching. The shared system prompt measures ~246 tokens; the minimum
+cacheable prefix is 512 on Opus 5 and 4096 on Haiku 4.5. A cache marker on a
+prefix that short is silently ignored — no error, no saving. Everything after
+the system prompt is unique to one agent anyway. There is deliberately no
+`cache_control` in `sim/llm_mind.py`, and a test asserts its absence so nobody
+adds one back believing it does something.
+
+### What stays true in LLM mode
+
+The prompt in `sim/llm_mind.py` states no task, no objective and no preferred
+behaviour. The model sees one agent's own perception and memory and nothing
+else — a test checks the prompt never names an agent the subject has not met.
+A name the agent cannot currently see is refused before it reaches the world.
+And if a call fails, that agent falls back to its local choice, so a network
+error never becomes a hidden nudge. Read that prompt before you trust any
+result from this mode.
 
 ## Knobs
 
@@ -149,6 +188,8 @@ that prompt before you trust any result from this mode.
 --llm                            # use real Claude calls (see above)
 --llm-model claude-haiku-4-5     # default claude-opus-5
 --llm-effort low                 # low | medium | high | xhigh | max
+--llm-batch                      # Message Batches API: half price, slower
+--llm-wake 8                     # only think when something changed
 --yes                            # skip the cost confirmation
 ```
 

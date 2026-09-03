@@ -62,21 +62,46 @@ def main(argv=None):
     p.add_argument("--llm-model", default="claude-opus-5")
     p.add_argument("--llm-effort", default="low",
                    choices=["low", "medium", "high", "xhigh", "max"])
+    p.add_argument("--llm-batch", action="store_true",
+                   help="use the Message Batches API: half price, but each "
+                        "tick waits for the batch to finish")
+    p.add_argument("--llm-wake", type=int, default=0, metavar="N",
+                   help="only consult the model when something changed for "
+                        "an agent, and at least every N moments. Cheaper, "
+                        "but biases agents toward thinking harder in company")
     p.add_argument("--yes", action="store_true",
                    help="skip the cost confirmation for --llm")
     args = p.parse_args(argv)
 
     minds = None
     if args.llm:
-        from sim.llm_mind import LLMMinds
-        calls, cost = LLMMinds.estimate(args.llm_model, args.agents, args.ticks)
-        print("--llm: %d agents x %d ticks = %s Claude calls on %s"
-              % (args.agents, args.ticks, "{:,}".format(calls), args.llm_model))
-        print("       rough cost before caching: about $%.2f" % cost)
+        from sim import llm_mind
+        calls, cost = llm_mind._Base.estimate(
+            args.llm_model, args.agents, args.ticks,
+            wake_gap=args.llm_wake, batch=args.llm_batch)
+        print("--llm: %s Claude calls on %s%s%s"
+              % ("{:,}".format(calls), args.llm_model,
+                 " (batched, half price)" if args.llm_batch else "",
+                 " (waking every <=%d moments)" % args.llm_wake
+                 if args.llm_wake else ""))
+        print("       rough cost: about $%.2f" % cost)
+        if not args.llm_batch and args.llm_model != "claude-haiku-4-5":
+            cheap, ccost = llm_mind._Base.estimate(
+                "claude-haiku-4-5", args.agents, args.ticks,
+                wake_gap=args.llm_wake or 8, batch=True)
+            print("       for comparison: --llm-model claude-haiku-4-5 "
+                  "--llm-batch --llm-wake 8 is about $%.2f" % ccost)
         if not args.yes:
             if input("       continue? [y/N] ").strip().lower() != "y":
                 return None
-        minds = LLMMinds(model=args.llm_model, effort=args.llm_effort)
+        wake = llm_mind.WakePolicy(args.llm_wake) if args.llm_wake else None
+        cls = llm_mind.BatchMinds if args.llm_batch else llm_mind.LiveMinds
+        kw = {"model": args.llm_model, "effort": args.llm_effort, "wake": wake}
+        if args.llm_batch:
+            kw["on_wait"] = lambda b: print("       batch %s: %d done"
+                                            % (b.processing_status,
+                                               b.request_counts.succeeded))
+        minds = cls(**kw)
 
     run_dir = args.out or os.path.join("runs", "seed%d" % args.seed)
     rec = Recorder(run_dir)
@@ -121,6 +146,11 @@ def main(argv=None):
     if minds is not None:
         print("\nClaude calls: %d   failed: %d   spent: $%.2f"
               % (minds.calls, minds.errors, minds.spend()))
+        if minds.wake is not None:
+            total = minds.wake.woke + minds.wake.slept
+            print("Woken: %d of %d possible calls (%.0f%% saved)"
+                  % (minds.wake.woke, total,
+                     100.0 * minds.wake.slept / max(1, total)))
 
     report = analyze.report(world)
     with open(os.path.join(run_dir, "report.txt"), "w", encoding="utf-8") as f:
