@@ -49,15 +49,16 @@ MODELS = {
     "claude-haiku-4-5": {"effort": False, "thinks": False,
                          "in_": 1.0,  "out": 5.0,  "est_out": 45},
 }
-EST_IN = 450          # measured: ~246 system + ~170 per-agent context
+EST_IN = 600          # measured: ~290 system + ~250 per-agent context,
+                      # allowing for growth as a memory fills
 
 # Not cached, deliberately. The shared system prompt measures about 246
 # tokens; the minimum cacheable prefix is 512 on Claude Opus 5 and 4096 on
 # Claude Haiku 4.5. A cache_control marker on a prefix that short is silently
 # ignored -- no error, no saving -- so claiming caching here would be a lie.
 # Everything after the system prompt is unique to one agent anyway.
-SYSTEM = """You are one entity among others in a closed world. You have a name
-and a memory of your own. Nothing outside this message exists for you.
+_SYSTEM_BASE = """You are one entity among others in a closed world. You have
+a name and a memory of your own. Nothing outside this message exists for you.
 
 Each moment you choose exactly one action:
 
@@ -73,9 +74,24 @@ Each moment you choose exactly one action:
 There is no task. There is no objective. There is no correct choice, and
 no one is keeping score. Doing nothing is exactly as valid as anything else.
 
-When you speak, you may use any sounds you like, including ones you have
-heard others use, ones you invent, and the names of people you remember.
-Keep an utterance to at most four short words."""
+You also carry one short private note about yourself. Older memories fade;
+that note does not. You may rewrite it whenever you like, or leave it alone
+by returning null. No one else ever sees it.
+
+"""
+
+_SPEECH = {
+    "tokens": """When you speak, you may use any sounds you like: ones you have
+heard others use, ones you invent, and the names of people you remember. Keep
+an utterance to at most four short sounds.""",
+    "words": """When you speak, use ordinary words, and say whatever you like.
+Keep it under twelve words.""",
+}
+
+
+def system_prompt(mode):
+    return _SYSTEM_BASE + _SPEECH[mode]
+
 
 SCHEMA = {
     "type": "json_schema",
@@ -89,8 +105,11 @@ SCHEMA = {
                        "description": "name of another entity, or null"},
             "utterance": {"type": ["string", "null"],
                           "description": "what you say aloud, or null"},
+            "self_note": {"type": ["string", "null"],
+                          "description": "rewrite your private note about "
+                                         "yourself, or null to keep it"},
         },
-        "required": ["action", "target", "utterance"],
+        "required": ["action", "target", "utterance", "self_note"],
         "additionalProperties": False,
     },
 }
@@ -98,48 +117,64 @@ SCHEMA = {
 
 def _describe(agent, perception, tick):
     """Everything this agent is entitled to know, and nothing else."""
-    lines = ["You are %s. This is moment %d." % (agent.name, tick)]
+    mem = agent.memory
+    lines = ["You are %s. You have existed for %d moments; this is moment %d."
+             % (agent.name, mem.moments, tick)]
+
+    if mem.self_note:
+        lines.append("\nThe note you carry about yourself: \"%s\""
+                     % mem.self_note)
 
     seen = perception["visible"]
     if seen:
         near = ", ".join(
             "%s (%d steps away)" % (v["name"], max(abs(v["dx"]), abs(v["dy"])))
             for v in seen[:10])
-        lines.append("You can see: " + near + ".")
+        lines.append("\nYou can see: " + near + ".")
     else:
-        lines.append("You can see no one.")
+        lines.append("\nYou can see no one.")
 
-    recent = agent.memory.recent(10)
-    if recent:
-        lines.append("\nWhat you remember of the last few moments:")
-        for e in recent:
-            k = e["kind"]
-            if k == "heard":
+    talk = mem.recent_speech(10)
+    if talk:
+        lines.append("\nThe last things said around you:")
+        for e in talk:
+            if e["kind"] == "heard":
                 lines.append("  %s said \"%s\"%s"
                              % (e["speaker"], " ".join(e["tokens"]),
                                 " to you" if e.get("directed") else ""))
-            elif k == "spoke":
-                lines.append("  you said \"%s\"" % " ".join(e["tokens"]))
-            elif k == "saw":
-                lines.append("  you saw %s" % ", ".join(e["who"][:5]))
-            elif k == "reflected":
-                lines.append("  you dwelt on \"%s\"" % e.get("token"))
-            elif k == "idle":
-                lines.append("  you did nothing")
+            else:
+                lines.append("  you said \"%s\"%s"
+                             % (" ".join(e["tokens"]),
+                                " to " + e["target"] if e.get("target") else ""))
     else:
-        lines.append("\nYou remember nothing yet.")
+        lines.append("\nNothing has been said around you.")
 
-    lex = sorted(agent.memory.lexicon.items(), key=lambda kv: -kv[1])[:8]
+    other = [e for e in mem.recent(8) if e["kind"] not in ("heard", "spoke")]
+    if other:
+        lines.append("\nOtherwise, lately:")
+        for e in other:
+            if e["kind"] == "saw":
+                line = "  you saw %s" % ", ".join(e["who"][:5])
+                if lines[-1] == line:      # standing still looks like this
+                    continue
+                lines.append(line)
+            elif e["kind"] == "reflected":
+                lines.append("  you dwelt on \"%s\"" % e.get("token"))
+            elif e["kind"] == "idle":
+                lines.append("  you did nothing")
+
+    lex = sorted(mem.lexicon.items(), key=lambda kv: -kv[1])[:8]
     if lex:
-        lines.append("\nSounds you have encountered, and how often: "
+        label = ("Sounds" if agent.speech_mode == "tokens" else "Words")
+        lines.append("\n%s you have encountered, and how often: " % label
                      + ", ".join("%s(%d)" % kv for kv in lex))
 
-    known = sorted(agent.memory.acquaintances.items(),
+    known = sorted(mem.acquaintances.items(),
                    key=lambda kv: -(kv[1]["seen"] + kv[1]["heard"]))[:8]
     if known:
         lines.append("People you have met: "
-                     + ", ".join("%s (seen %d, heard speak %d)"
-                                 % (n, v["seen"], v["heard"])
+                     + ", ".join("%s (seen %d, heard speak %d, spoke to you %d)"
+                                 % (n, v["seen"], v["heard"], v["addressed_me"])
                                  for n, v in known))
 
     lines.append("\nChoose your one action for this moment.")
@@ -152,7 +187,7 @@ def request_params(model, effort, agent, perception, tick):
     params = {
         "model": model,
         "max_tokens": 2000,
-        "system": SYSTEM,
+        "system": system_prompt(agent.speech_mode),
         "messages": [{"role": "user",
                       "content": _describe(agent, perception, tick)}],
         "output_config": {"format": SCHEMA},
@@ -167,6 +202,7 @@ def to_decision(agent, perception, data):
 
     A name the agent cannot currently see is refused here, so the model can
     never act on someone it was not shown."""
+    agent.memory.note_self(data.get("self_note"))
     act = data.get("action", "idle")
     visible = {v["name"] for v in perception["visible"]}
     target = data.get("target")
@@ -178,7 +214,8 @@ def to_decision(agent, perception, data):
         return {"action": act, "target": target}
     if act in ("speak", "address"):
         said = (data.get("utterance") or "").strip()
-        tokens = said.split()[:4] or ["..."]
+        cap = 4 if agent.speech_mode == "tokens" else 12
+        tokens = said.split()[:cap] or ["..."]
         if act == "address" and target is None:
             return {"action": "speak", "tokens": tokens}
         d = {"action": act, "tokens": tokens}

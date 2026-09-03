@@ -17,11 +17,13 @@ def _sign(v):
 
 class World:
     def __init__(self, width=90, height=90, n_agents=100, vision=6,
-                 hearing=6, seed=1, memory_capacity=300, decider=None):
+                 hearing=6, seed=1, memory_capacity=500, decider=None,
+                 speech_mode="tokens"):
         self.width = width
         self.height = height
         self.vision = vision
         self.hearing = hearing
+        self.speech_mode = speech_mode
         self.tick_no = 0
         self.rng = random.Random(seed)
         # Optional replacement for how agents choose (see sim/llm_mind.py).
@@ -34,7 +36,7 @@ class World:
             a = Agent(i, name,
                       self.rng.randrange(width), self.rng.randrange(height),
                       random.Random(self.rng.randrange(2 ** 31)),
-                      memory_capacity)
+                      memory_capacity, speech_mode)
             self.agents.append(a)
         self.by_name = {a.name: a for a in self.agents}
 
@@ -97,6 +99,7 @@ class World:
         for a in self.agents:
             p = {"tick": tick, "here": (a.x, a.y), "visible": self._visible_to(a)}
             perceptions[a.id] = p
+            a.memory.moments += 1
             a.perceive(p, tick)
 
         # 2. Everyone decides, privately and simultaneously.

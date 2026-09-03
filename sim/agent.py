@@ -10,8 +10,8 @@ Design rules this file obeys:
   * An agent may only use what is in its own memory and its own perception.
 """
 
+from .lexicon import coin
 from .memory import Memory
-from .naming import make_word
 
 ACTIONS = ["idle", "wander", "approach", "avoid", "observe",
            "speak", "address", "reflect"]
@@ -21,12 +21,14 @@ DIRS = [(-1, -1), (0, -1), (1, -1), (-1, 0),
 
 
 class Agent:
-    def __init__(self, agent_id, name, x, y, rng, memory_capacity=300):
+    def __init__(self, agent_id, name, x, y, rng, memory_capacity=500,
+                 speech_mode="tokens"):
         self.id = agent_id
         self.name = name
         self.x = x
         self.y = y
         self.rng = rng
+        self.speech_mode = speech_mode
         self.memory = Memory(memory_capacity)
         self.heading = rng.choice(DIRS)
         self.alive_since = 0
@@ -46,7 +48,7 @@ class Agent:
     def _pick_token(self):
         lex = self.memory.lexicon
         if not lex or self.rng.random() < self.invent_rate:
-            token = make_word(self.rng, 1, 2)
+            token = coin(self.rng, self.speech_mode)
             self.memory.note_token(token)
             return token
         tokens = list(lex.keys())

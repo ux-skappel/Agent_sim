@@ -50,7 +50,12 @@ def main(argv=None):
     p.add_argument("--height", type=int, default=90)
     p.add_argument("--vision", type=int, default=6)
     p.add_argument("--hearing", type=int, default=6)
-    p.add_argument("--memory", type=int, default=300, help="episodes kept per agent")
+    p.add_argument("--memory", type=int, default=500,
+                   help="episodes kept per agent")
+    p.add_argument("--speech", default="tokens", choices=["tokens", "words"],
+                   help="tokens: invented syllables, cleanly measurable. "
+                        "words: real language, far more human, but the word "
+                        "pool is supplied rather than invented")
     p.add_argument("--seed", type=int, default=1)
     p.add_argument("--out", default=None, help="run directory (default runs/<seed>)")
     p.add_argument("--live", action="store_true", help="ASCII view while running")
@@ -107,11 +112,12 @@ def main(argv=None):
     rec = Recorder(run_dir)
     world = World(width=args.width, height=args.height, n_agents=args.agents,
                   vision=args.vision, hearing=args.hearing, seed=args.seed,
-                  memory_capacity=args.memory, decider=minds)
+                  memory_capacity=args.memory, decider=minds,
+                  speech_mode=args.speech)
 
-    print("world %dx%d  agents=%d  vision=%d  ticks=%d  seed=%d"
+    print("world %dx%d  agents=%d  vision=%d  ticks=%d  seed=%d  speech=%s"
           % (args.width, args.height, args.agents, args.vision,
-             args.ticks, args.seed))
+             args.ticks, args.seed, args.speech))
     print("logging to %s/" % run_dir)
 
     t0 = time.time()
@@ -129,6 +135,7 @@ def main(argv=None):
 
     meta = {"width": args.width, "height": args.height, "ticks": args.ticks,
             "seed": args.seed, "vision": args.vision, "hearing": args.hearing,
+            "speech": args.speech,
             "names": [a.name for a in world.agents],
             "tokens": [t for t, _ in sorted(world.token_ids.items(),
                                             key=lambda kv: kv[1])]}

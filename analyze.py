@@ -12,6 +12,8 @@ import os
 import random
 import sys
 
+from sim.lexicon import SEED_WORDS
+
 
 # -- clustering ----------------------------------------------------------
 def components(positions, radius):
@@ -93,10 +95,18 @@ def report(world):
         d = a.memory.dominant_token()
         doms[d] = doms.get(d, 0) + 1
     top = sorted(doms.items(), key=lambda kv: -kv[1])[:6]
+    unit = "sound" if world.speech_mode == "tokens" else "word"
     add("")
-    add("-- shared vocabulary (most-repeated sound in each private memory) --")
-    add("  distinct sounds ever uttered: %d" % len(world.token_ids))
-    add("  distinct 'favourite' sounds across the population: %d" % len(doms))
+    add("-- shared vocabulary (most-repeated %s in each private memory) --"
+        % unit)
+    add("  distinct %ss ever uttered: %d" % (unit, len(world.token_ids)))
+    add("  distinct 'favourite' %ss across the population: %d"
+        % (unit, len(doms)))
+    if world.speech_mode == "words":
+        add("  NOTE: in --speech words the pool is a fixed list of %d supplied"
+            % len(SEED_WORDS))
+        add("        words, so agreement is partly the small pool, not only")
+        add("        contact. Compare against a --speech tokens run.")
     for tok, c in top:
         add("  %-10s held by %3d agents  %s"
             % (tok if tok else "(silence)", c, _bar(c / n)))

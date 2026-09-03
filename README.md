@@ -101,6 +101,43 @@ Re-analyse a finished run without re-running it:
 python3 analyze.py runs/seed1
 ```
 
+## Two speech modes
+
+```bash
+python3 run.py --speech tokens    # default: invented syllables
+python3 run.py --speech words     # real words
+```
+
+They answer different questions, and the trade is real.
+
+**`tokens`** — agents coin nonsense syllables from an unbounded pool. Two
+agents saying the same thing can only mean contact happened. That is what
+makes convergence *measurable*: 1,464 sounds invented, 30 surviving as
+favourites is a clean result.
+
+**`words`** — agents speak real words, which is far more human to read
+(`Fumu → Vuvomu "i edge stone"`). The cost: the pool is a fixed list of 66
+words in `sim/lexicon.py`, and it is **mine, not theirs**. Every word is a
+concept they did not invent, and words are not neutral — `yes` and `no` alone
+hand them agreement and refusal for free. Agreement also comes cheaply from a
+small pool: a 25-agent words run converged 12 agents onto one word, which is
+partly contact and partly the fact that there were only 91 things to say.
+`report.txt` prints that warning itself.
+
+Run both on the same seed before you conclude anything.
+
+## What each agent carries about itself
+
+Memory fades — the oldest episodes fall off the end. One thing does not: a
+short private note the agent writes about itself and carries forward into
+every future moment. In `--llm` mode the model may rewrite it on any turn
+(it is a field in the same response, so it costs no extra call), or return
+null to keep the one it has. Nobody else ever sees it.
+
+That note is what gives an agent continuity longer than its memory window —
+the difference between an entity and a goldfish. A test checks it survives
+a memory being completely overwritten.
+
 ## Optional: real Claude minds, and how to afford 100 of them
 
 By default the agents think locally — the choosing is stochastic Python, not a

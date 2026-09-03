@@ -83,7 +83,7 @@ TEMPLATE = r"""<title>__TITLE__</title>
 
   <div class="side">
     <div class="card">
-      <p class="k">Most-repeated sound, per agent</p>
+      <p class="k">__UNIT_LABEL__</p>
       <div id="legend"></div>
     </div>
     <div class="card">
@@ -267,14 +267,17 @@ def build(run_dir, out_name="replay.html"):
         series.append({"token": t, "values": vals})
 
     title = "Emergence &mdash; %d agents, no goals" % n
+    unit = "sounds" if meta.get("speech", "tokens") == "tokens" else "words"
     sub = ("%d&times;%d closed world &middot; %d ticks &middot; vision %d "
-           "&middot; seed %d &middot; %d distinct sounds uttered"
+           "&middot; seed %d &middot; %d distinct %s uttered"
            % (meta["width"], meta["height"], meta["ticks"], meta["vision"],
-              meta["seed"], len(meta["tokens"])))
+              meta["seed"], len(meta["tokens"]), unit))
 
     html = (TEMPLATE
             .replace("__TITLE__", title)
             .replace("__SUB__", sub)
+            .replace("__UNIT_LABEL__", "Most-repeated %s, per agent"
+                     % unit[:-1])
             .replace("__DATA__", json.dumps(data, separators=(",", ":")))
             .replace("__SERIES__", json.dumps(series, separators=(",", ":"))))
     out = os.path.join(run_dir, out_name)

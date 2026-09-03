@@ -317,6 +317,93 @@ class TestLiveMindsWithFakeClient(unittest.TestCase):
         self.assertIn("hello", w.token_ids)
 
 
+class TestSpeechModes(unittest.TestCase):
+    def test_tokens_mode_invents_outside_any_supplied_pool(self):
+        from sim.lexicon import SEED_WORDS
+        w = World(n_agents=20, width=25, height=25, seed=1,
+                  speech_mode="tokens")
+        w.run(60)
+        names = {a.name for a in w.agents}
+        coined = set(w.token_ids) - names
+        self.assertTrue(coined)
+        self.assertFalse(coined & set(SEED_WORDS),
+                         "tokens mode drew from the supplied word pool")
+
+    def test_words_mode_speaks_only_supplied_words_and_names(self):
+        from sim.lexicon import SEED_WORDS
+        w = World(n_agents=20, width=25, height=25, seed=1,
+                  speech_mode="words")
+        w.run(60)
+        allowed = set(SEED_WORDS) | {a.name for a in w.agents}
+        self.assertEqual(set(w.token_ids) - allowed, set())
+
+    def test_the_two_modes_diverge(self):
+        a = World(n_agents=15, width=25, height=25, seed=7,
+                  speech_mode="tokens")
+        b = World(n_agents=15, width=25, height=25, seed=7,
+                  speech_mode="words")
+        a.run(50)
+        b.run(50)
+        self.assertNotEqual(set(a.token_ids), set(b.token_ids))
+
+
+class TestSelfNote(unittest.TestCase):
+    """The note is the only thing that outlives a fading memory."""
+
+    def _agent(self, capacity=500):
+        w = World(n_agents=4, width=12, height=12, seed=1,
+                  memory_capacity=capacity)
+        w.run(5)
+        a = w.agents[0]
+        return a, {"tick": 6, "here": (a.x, a.y), "visible": []}
+
+    def test_the_model_can_write_and_keep_a_note(self):
+        from sim.llm_mind import to_decision
+        a, view = self._agent()
+        to_decision(a, view, {"action": "idle", "target": None,
+                              "utterance": None, "self_note": "I wait a lot."})
+        self.assertEqual(a.memory.self_note, "I wait a lot.")
+        to_decision(a, view, {"action": "idle", "target": None,
+                              "utterance": None, "self_note": None})
+        self.assertEqual(a.memory.self_note, "I wait a lot.")
+
+    def test_the_note_survives_memory_being_overwritten(self):
+        from sim.llm_mind import to_decision, _describe
+        w = World(n_agents=6, width=15, height=15, seed=2,
+                  memory_capacity=20)
+        a = w.agents[0]
+        w.run(3)
+        view = {"tick": 4, "here": (a.x, a.y), "visible": []}
+        to_decision(a, view, {"action": "idle", "target": None,
+                              "utterance": None,
+                              "self_note": "Nobody answers me."})
+        w.run(200)
+        self.assertLessEqual(len(a.memory.episodes), 20)
+        self.assertEqual(a.memory.self_note, "Nobody answers me.")
+        self.assertIn("Nobody answers me.", _describe(a, view, 205))
+
+    def test_the_note_is_in_the_schema_and_is_private(self):
+        from sim.llm_mind import SCHEMA
+        self.assertIn("self_note", SCHEMA["schema"]["required"])
+        a, view = self._agent()
+        a.memory.note_self("secret")
+        for other in ("Loga", "Selo"):
+            self.assertNotIn(other, str(a.memory.self_note))
+
+    def test_utterance_cap_follows_the_speech_mode(self):
+        from sim.llm_mind import to_decision
+        long = "one two three four five six seven eight nine ten eleven twelve"
+        for mode, cap in (("tokens", 4), ("words", 12)):
+            w = World(n_agents=4, width=12, height=12, seed=1,
+                      speech_mode=mode)
+            a = w.agents[0]
+            view = {"tick": 1, "here": (a.x, a.y), "visible": []}
+            d = to_decision(a, view, {"action": "speak", "target": None,
+                                      "utterance": long + " thirteen",
+                                      "self_note": None})
+            self.assertEqual(len(d["tokens"]), cap, mode)
+
+
 class TestWorldIsClosed(unittest.TestCase):
     def test_nobody_leaves(self):
         w = World(n_agents=40, width=20, height=20, seed=8)

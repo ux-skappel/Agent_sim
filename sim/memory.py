@@ -13,6 +13,8 @@ class Memory:
         self.episodes = deque(maxlen=capacity)   # what happened, in order
         self.lexicon = {}                        # token -> times encountered
         self.acquaintances = {}                  # name -> private impression
+        self.self_note = None                    # what it last said it was
+        self.moments = 0                         # how long it has existed
 
     # -- writing ---------------------------------------------------------
     def record(self, tick, kind, **fields):
@@ -57,8 +59,21 @@ class Memory:
     def recent(self, n=12):
         return list(self.episodes)[-n:]
 
+    def recent_speech(self, n=10):
+        """Conversation only. Outlives the general window, because what was
+        said to you is the part of the past that keeps mattering."""
+        talk = [e for e in self.episodes if e["kind"] in ("heard", "spoke")]
+        return talk[-n:]
+
+    def note_self(self, text):
+        text = (text or "").strip()
+        if text:
+            self.self_note = text[:280]
+
     def snapshot(self):
         return {
+            "self_note": self.self_note,
+            "moments": self.moments,
             "lexicon": dict(sorted(self.lexicon.items(),
                                    key=lambda kv: -kv[1])[:20]),
             "acquaintances": {
