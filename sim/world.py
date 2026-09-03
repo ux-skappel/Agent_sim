@@ -17,13 +17,16 @@ def _sign(v):
 
 class World:
     def __init__(self, width=90, height=90, n_agents=100, vision=6,
-                 hearing=6, seed=1, memory_capacity=300):
+                 hearing=6, seed=1, memory_capacity=300, decider=None):
         self.width = width
         self.height = height
         self.vision = vision
         self.hearing = hearing
         self.tick_no = 0
         self.rng = random.Random(seed)
+        # Optional replacement for how agents choose (see sim/llm_mind.py).
+        # It receives one agent's own perception and nothing else.
+        self.decider = decider
 
         names = make_names(self.rng, n_agents)
         self.agents = []
@@ -97,7 +100,11 @@ class World:
             a.perceive(p, tick)
 
         # 2. Everyone decides, privately and simultaneously.
-        decisions = [(a, a.decide(perceptions[a.id], tick)) for a in self.agents]
+        if self.decider is not None:
+            decisions = self.decider(self.agents, perceptions, tick)
+        else:
+            decisions = [(a, a.decide(perceptions[a.id], tick))
+                         for a in self.agents]
 
         # 3. Actions take effect.
         pending_speech = []

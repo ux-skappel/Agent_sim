@@ -56,13 +56,33 @@ def main(argv=None):
     p.add_argument("--live", action="store_true", help="ASCII view while running")
     p.add_argument("--fps", type=float, default=12.0, help="live view speed")
     p.add_argument("--no-viz", action="store_true")
+    p.add_argument("--llm", action="store_true",
+                   help="let a real Claude call make each agent's choice "
+                        "(costs money; see README)")
+    p.add_argument("--llm-model", default="claude-opus-5")
+    p.add_argument("--llm-effort", default="low",
+                   choices=["low", "medium", "high", "xhigh", "max"])
+    p.add_argument("--yes", action="store_true",
+                   help="skip the cost confirmation for --llm")
     args = p.parse_args(argv)
+
+    minds = None
+    if args.llm:
+        from sim.llm_mind import LLMMinds
+        calls, cost = LLMMinds.estimate(args.llm_model, args.agents, args.ticks)
+        print("--llm: %d agents x %d ticks = %s Claude calls on %s"
+              % (args.agents, args.ticks, "{:,}".format(calls), args.llm_model))
+        print("       rough cost before caching: about $%.2f" % cost)
+        if not args.yes:
+            if input("       continue? [y/N] ").strip().lower() != "y":
+                return None
+        minds = LLMMinds(model=args.llm_model, effort=args.llm_effort)
 
     run_dir = args.out or os.path.join("runs", "seed%d" % args.seed)
     rec = Recorder(run_dir)
     world = World(width=args.width, height=args.height, n_agents=args.agents,
                   vision=args.vision, hearing=args.hearing, seed=args.seed,
-                  memory_capacity=args.memory)
+                  memory_capacity=args.memory, decider=minds)
 
     print("world %dx%d  agents=%d  vision=%d  ticks=%d  seed=%d"
           % (args.width, args.height, args.agents, args.vision,
@@ -97,6 +117,10 @@ def main(argv=None):
                     "invent_rate": round(a.invent_rate, 3),
                     "memory": a.memory.snapshot()}
                    for a in world.agents], f, indent=1)
+
+    if minds is not None:
+        print("\nClaude calls: %d   failed: %d   spent: $%.2f"
+              % (minds.calls, minds.errors, minds.spend()))
 
     report = analyze.report(world)
     with open(os.path.join(run_dir, "report.txt"), "w", encoding="utf-8") as f:

@@ -101,6 +101,41 @@ Re-analyse a finished run without re-running it:
 python3 analyze.py runs/seed1
 ```
 
+## Optional: let a real Claude model do the thinking
+
+By default the agents think locally — the choosing is stochastic Python, not a
+language model. That is what makes 100 agents × 600 ticks finish in four
+seconds.
+
+If you want each agent's choice made by an actual Claude call instead:
+
+```bash
+pip install anthropic
+export ANTHROPIC_API_KEY=...        # or: ant auth login
+
+python3 run.py --llm --agents 12 --ticks 40
+```
+
+One call per agent per tick, all agents in a tick issued in parallel. `run.py`
+prints an estimate and asks before spending anything:
+
+```
+--llm: 12 agents x 40 ticks = 480 Claude calls on claude-opus-5
+       rough cost before caching: about $3.60
+       continue? [y/N]
+```
+
+**Start small.** The full default run is 60,000 calls — a few hundred dollars.
+`--llm-model claude-haiku-4-5` is ~5× cheaper if you want a bigger world;
+`--llm-effort` trades depth against spend.
+
+The rules do not change in this mode. The prompt in `sim/llm_mind.py` states no
+task, no objective and no preferred behaviour; the model sees one agent's own
+perception and memory and nothing else; a name the agent cannot currently see
+cannot be acted on; and if a call fails the agent falls back to its local
+choice, so a network error never becomes a hidden nudge. It is worth reading
+that prompt before you trust any result from this mode.
+
 ## Knobs
 
 ```
@@ -110,6 +145,11 @@ python3 analyze.py runs/seed1
 --memory 300     # episodes kept per agent before the oldest is forgotten
 --live --fps 12  # terminal view
 --no-viz         # skip building replay.html
+
+--llm                            # use real Claude calls (see above)
+--llm-model claude-haiku-4-5     # default claude-opus-5
+--llm-effort low                 # low | medium | high | xhigh | max
+--yes                            # skip the cost confirmation
 ```
 
 Density is the interesting dial. A smaller world makes encounters constant; a

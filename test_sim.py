@@ -112,6 +112,69 @@ class TestNoHiddenObjective(unittest.TestCase):
             self.assertGreater(w.action_counts.get(act, 0), 0, act)
 
 
+class TestLLMMindPlumbing(unittest.TestCase):
+    """The --llm path, exercised without spending anything."""
+
+    def _agent_and_view(self):
+        w = World(n_agents=6, width=12, height=12, seed=1)
+        w.run(15)
+        a = w.agents[0]
+        return a, {"tick": 16, "here": (a.x, a.y),
+                   "visible": [{"name": w.agents[1].name, "dx": 2, "dy": -1}]}
+
+    def test_prompt_leaks_nothing_the_agent_has_not_perceived(self):
+        from sim.llm_mind import _describe
+        w = World(n_agents=8, width=60, height=60, seed=2)
+        w.run(10)
+        a = w.agents[0]
+        view = {"tick": 11, "here": (a.x, a.y), "visible": []}
+        text = _describe(a, view, 11)
+        allowed = set(a.memory.acquaintances) | {a.name}
+        for other in w.agents:
+            if other.name not in allowed:
+                self.assertNotIn(other.name, text,
+                                 "prompt named a stranger: %s" % other.name)
+
+    def test_unseen_target_cannot_be_acted_on(self):
+        from sim.llm_mind import LLMMinds
+        a, view = self._agent_and_view()
+        d = LLMMinds._to_decision(None, a, view,
+                                  {"action": "approach", "target": "Ghost",
+                                   "utterance": None})
+        self.assertEqual(d["action"], "wander")
+
+    def test_actions_map_through(self):
+        from sim.llm_mind import LLMMinds
+        a, view = self._agent_and_view()
+        seen = view["visible"][0]["name"]
+        cases = [
+            ({"action": "idle", "target": None, "utterance": None},
+             {"action": "idle"}),
+            ({"action": "avoid", "target": seen, "utterance": None},
+             {"action": "avoid", "target": seen}),
+            ({"action": "address", "target": seen, "utterance": "ka ru"},
+             {"action": "address", "tokens": ["ka", "ru"], "target": seen}),
+            ({"action": "fly", "target": None, "utterance": None},
+             {"action": "idle"}),
+        ]
+        for data, want in cases:
+            self.assertEqual(LLMMinds._to_decision(None, a, view, data), want)
+
+    def test_utterance_is_capped(self):
+        from sim.llm_mind import LLMMinds
+        a, view = self._agent_and_view()
+        d = LLMMinds._to_decision(None, a, view,
+                                  {"action": "speak", "target": None,
+                                   "utterance": "a b c d e f g"})
+        self.assertEqual(len(d["tokens"]), 4)
+
+    def test_cost_estimate_is_reported_before_spending(self):
+        from sim.llm_mind import LLMMinds
+        calls, cost = LLMMinds.estimate("claude-opus-5", 100, 600)
+        self.assertEqual(calls, 60000)
+        self.assertGreater(cost, 0)
+
+
 class TestWorldIsClosed(unittest.TestCase):
     def test_nobody_leaves(self):
         w = World(n_agents=40, width=20, height=20, seed=8)

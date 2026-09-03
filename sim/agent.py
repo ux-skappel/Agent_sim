@@ -74,7 +74,7 @@ class Agent:
         weights = [self.memory.salience(n, tick) + 0.5 for n in names]
         return self.rng.choices(names, weights=weights, k=1)[0]
 
-    def decide(self, perception, tick):
+    def local_decide(self, perception, tick):
         visible = perception["visible"]
         weights = dict(self.temperament)
         if not visible:
@@ -100,6 +100,10 @@ class Agent:
         if choice == "speak":
             return {"action": "speak", "tokens": self.utterance(tick)}
         return {"action": choice}
+
+    # The world calls decide(); --llm swaps it out but always keeps
+    # local_decide as the fallback when a call fails.
+    decide = local_decide
 
     # -- perceiving ------------------------------------------------------
     def perceive(self, perception, tick):
